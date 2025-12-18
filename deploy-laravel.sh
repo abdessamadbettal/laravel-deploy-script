@@ -274,7 +274,15 @@ clone_repository() {
     mkdir -p "$INSTALL_DIR"
     
     print_info "Cloning from $GIT_REPO (branch: $GIT_BRANCH)..."
-    git clone -b "$GIT_BRANCH" "$GIT_REPO" "$INSTALL_DIR"
+    if ! git clone -b "$GIT_BRANCH" "$GIT_REPO" "$INSTALL_DIR"; then
+        print_error "Failed to clone repository"
+        print_info "Please check:"
+        print_info "  - Repository URL is correct"
+        print_info "  - Branch name exists"
+        print_info "  - You have access (use SSH keys for private repos)"
+        print_info "  - Network connectivity is available"
+        exit 1
+    fi
     
     print_success "Repository cloned successfully"
 }
@@ -301,23 +309,33 @@ setup_database() {
 setup_mysql_database() {
     print_info "Creating MySQL database and user..."
     
+    # Check if MySQL root password is needed
+    MYSQL_CMD="mysql"
+    if ! mysql -e "SELECT 1;" &>/dev/null; then
+        print_info "MySQL requires authentication"
+        read -sp "Enter MySQL root password: " MYSQL_ROOT_PASS
+        echo ""
+        MYSQL_CMD="mysql -p${MYSQL_ROOT_PASS}"
+    fi
+    
     # Create database and user
-    mysql -e "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" || {
+    $MYSQL_CMD -e "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" || {
         print_error "Failed to create database"
+        print_info "Please check MySQL root credentials and permissions"
         exit 1
     }
     
-    mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'${DB_HOST}' IDENTIFIED BY '${DB_PASSWORD}';" || {
+    $MYSQL_CMD -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'${DB_HOST}' IDENTIFIED BY '${DB_PASSWORD}';" || {
         print_error "Failed to create user"
         exit 1
     }
     
-    mysql -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'${DB_HOST}';" || {
+    $MYSQL_CMD -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'${DB_HOST}';" || {
         print_error "Failed to grant privileges"
         exit 1
     }
     
-    mysql -e "FLUSH PRIVILEGES;" || {
+    $MYSQL_CMD -e "FLUSH PRIVILEGES;" || {
         print_error "Failed to flush privileges"
         exit 1
     }
@@ -586,6 +604,24 @@ configure_nginx() {
     mkdir -p "$NGINX_SITES_DIR"
     mkdir -p "$NGINX_SITES_ENABLED"
     
+    # Detect PHP-FPM socket
+    PHP_FPM_SOCKET="/var/run/php/php-fpm.sock"
+    if [[ -S "/var/run/php/php-fpm.sock" ]]; then
+        PHP_FPM_SOCKET="/var/run/php/php-fpm.sock"
+    elif [[ -S "/run/php/php-fpm.sock" ]]; then
+        PHP_FPM_SOCKET="/run/php/php-fpm.sock"
+    else
+        # Try to find versioned PHP-FPM sockets
+        for socket in /var/run/php/php*-fpm.sock /run/php/php*-fpm.sock; do
+            if [[ -S "$socket" ]]; then
+                PHP_FPM_SOCKET="$socket"
+                break
+            fi
+        done
+    fi
+    
+    print_info "Using PHP-FPM socket: $PHP_FPM_SOCKET"
+    
     CONFIG_FILE="$NGINX_SITES_DIR/${DOMAIN_NAME}"
     
     print_info "Creating Nginx server block configuration..."
@@ -614,9 +650,10 @@ server {
     error_page 404 /index.php;
 
     location ~ \.php$ {
-        fastcgi_pass unix:/var/run/php/php-fpm.sock;
+        fastcgi_pass unix:${PHP_FPM_SOCKET};
         fastcgi_param SCRIPT_FILENAME \$realpath_root\$fastcgi_script_name;
         include fastcgi_params;
+        fastcgi_index index.php;
     }
 
     location ~ /\.(?!well-known).* {
@@ -631,11 +668,21 @@ EOF
     ln -sf "$CONFIG_FILE" "$NGINX_SITES_ENABLED/${DOMAIN_NAME}"
     
     # Test configuration
-    nginx -t
+    print_info "Testing Nginx configuration..."
+    if ! nginx -t; then
+        print_error "Nginx configuration test failed"
+        print_info "Please check the configuration file: $CONFIG_FILE"
+        exit 1
+    fi
+    
+    print_success "Nginx configuration test passed"
     
     # Restart Nginx
     print_info "Restarting Nginx..."
-    systemctl restart nginx
+    if ! systemctl restart nginx; then
+        print_error "Failed to restart Nginx"
+        exit 1
+    fi
     
     print_success "Nginx configured and restarted"
 }

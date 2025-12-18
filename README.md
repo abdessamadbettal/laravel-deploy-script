@@ -42,14 +42,18 @@ Your PHP installation should have these extensions:
 
 1. **Download the script:**
    ```bash
-   wget https://raw.githubusercontent.com/abdessamadbettal/laravel-deploy-script/main/deploy-laravel.sh
+   # Replace with your actual repository URL
+   wget https://raw.githubusercontent.com/yourusername/laravel-deploy-script/main/deploy-laravel.sh
    ```
 
    Or clone the repository:
    ```bash
-   git clone https://github.com/abdessamadbettal/laravel-deploy-script.git
+   # Clone this repository
+   git clone https://github.com/yourusername/laravel-deploy-script.git
    cd laravel-deploy-script
    ```
+   
+   **Note:** Replace `yourusername` with the actual repository owner.
 
 2. **Make the script executable:**
    ```bash
